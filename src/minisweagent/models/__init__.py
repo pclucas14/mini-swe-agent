@@ -76,6 +76,10 @@ def get_model_class(model_name: str) -> type:
         from minisweagent.models.anthropic import AnthropicModel
 
         return AnthropicModel
+    if any(s in model_name.lower() for s in ["gpt-4o_2024-11-20", "o3-mini_2025-01-31", "gpt-4.1_2025-04-14", "gpt-4.1-mini_2025-04-14"]):
+        from minisweagent.models.trapi_model import TrapiModel
+
+        return TrapiModel
     from minisweagent.models.litellm_model import LitellmModel
 
     return LitellmModel
