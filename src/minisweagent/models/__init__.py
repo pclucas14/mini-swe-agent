@@ -73,10 +73,10 @@ def get_model_name(input_model_name: str | None = None, config: dict | None = No
 def get_model_class(model_name: str) -> type:
     """Select the best model class for a given model name."""
     if any(s in model_name.lower() for s in ["anthropic", "sonnet", "opus", "claude"]):
-        from minisweagent.models.anthropic import AnthropicModel
+        from minisweagent.models.devdiv_model import DevDivModel
 
-        return AnthropicModel
-    if any(s in model_name.lower() for s in ["gpt-4o_2024-11-20", "o3-mini_2025-01-31", "gpt-4.1_2025-04-14", "gpt-4.1-mini_2025-04-14"]):
+        return DevDivModel
+    if any(s in model_name.lower() for s in ["gpt", "o3"]):
         from minisweagent.models.trapi_model import TrapiModel
 
         return TrapiModel
