@@ -17,7 +17,7 @@ class AgentConfig:
     # The default settings are the bare minimum to run the agent. Take a look at the config files for improved settings.
     system_template: str = "You are a helpful assistant that can do anything."
     instance_template: str = (
-        "Your task: {{task}}. Please reply with a single shell command in triple backticks. "
+        "Your task: {{task}}. Please reply with a single shell command in triple backticks, such as to match the following regex : '```bash\n(.*?)\n```'"
         "To finish, the first line of the output of the shell command must be 'COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'."
     )
     timeout_template: str = (
@@ -25,7 +25,9 @@ class AgentConfig:
         "The output of the command was:\n <output>\n{{output}}\n</output>\n"
         "Please try another command and make sure to avoid those requiring interactive input."
     )
-    format_error_template: str = "Please always provide EXACTLY ONE action in triple backticks."
+    format_error_template: str = (
+        "Please always provide EXACTLY ONE action in triple backticks."
+    )
     action_observation_template: str = "Observation: {{output}}"
     step_limit: int = 0
     cost_limit: float = 3.0
@@ -56,14 +58,26 @@ class LimitsExceeded(TerminatingException):
 
 
 class DefaultAgent:
-    def __init__(self, model: Model, env: Environment, *, config_class: Callable = AgentConfig, **kwargs):
+    def __init__(
+        self,
+        model: Model,
+        env: Environment,
+        *,
+        config_class: Callable = AgentConfig,
+        **kwargs,
+    ):
         self.config = config_class(**kwargs)
         self.messages: list[dict] = []
         self.model = model
         self.env = env
 
     def render_template(self, template: str, **kwargs) -> str:
-        cs = asdict(self.config) | asdict(self.env.config) | asdict(self.model.config) | platform.uname()._asdict()
+        cs = (
+            asdict(self.config)
+            | asdict(self.env.config)
+            | asdict(self.model.config)
+            | platform.uname()._asdict()
+        )
         return Template(template).render(**kwargs, **cs, **os.environ)
 
     def add_message(self, role: str, content: str, **kwargs):
@@ -73,14 +87,18 @@ class DefaultAgent:
         """Run step() until agent is finished. Return exit status & message"""
         self.messages = []
         self.add_message("system", self.render_template(self.config.system_template))
-        self.add_message("user", self.render_template(self.config.instance_template, task=task))
+        self.add_message(
+            "user", self.render_template(self.config.instance_template, task=task)
+        )
         while True:
             try:
                 self.step()
             except NonTerminatingException as e:
                 self.add_message("user", str(e))
+                print(f"Non-terminating exception: {e}")
             except TerminatingException as e:
                 self.add_message("user", str(e))
+                print(f"Terminating exception: {e}")
                 return type(e).__name__, str(e)
 
     def step(self) -> dict:
@@ -89,8 +107,12 @@ class DefaultAgent:
 
     def query(self) -> dict:
         """Query the model and return the response."""
-        if 0 < self.config.step_limit <= self.model.n_calls or 0 < self.config.cost_limit <= self.model.cost:
+        if (
+            0 < self.config.step_limit <= self.model.n_calls
+            or 0 < self.config.cost_limit <= self.model.cost
+        ):
             raise LimitsExceeded()
+
         response = self.model.query(self.messages)
         self.add_message("assistant", **response)
         return response
@@ -98,7 +120,9 @@ class DefaultAgent:
     def get_observation(self, response: dict) -> dict:
         """Execute the action and return the observation."""
         output = self.execute_action(self.parse_action(response))
-        observation = self.render_template(self.config.action_observation_template, output=output)
+        observation = self.render_template(
+            self.config.action_observation_template, output=output
+        )
         self.add_message("user", observation)
         return output
 
@@ -107,7 +131,12 @@ class DefaultAgent:
         actions = re.findall(r"```bash\n(.*?)\n```", response["content"], re.DOTALL)
         if len(actions) == 1:
             return {"action": actions[0].strip(), **response}
-        raise FormatError(self.render_template(self.config.format_error_template, actions=actions))
+
+        print(response)
+        # breakpoint()
+        raise FormatError(
+            self.render_template(self.config.format_error_template, actions=actions)
+        )
 
     def execute_action(self, action: dict) -> dict:
         try:
@@ -115,15 +144,24 @@ class DefaultAgent:
         except subprocess.TimeoutExpired as e:
             output = e.output.decode("utf-8", errors="replace") if e.output else ""
             raise ExecutionTimeoutError(
-                self.render_template(self.config.timeout_template, action=action, output=output)
+                self.render_template(
+                    self.config.timeout_template, action=action, output=output
+                )
             )
         except TimeoutError:
-            raise ExecutionTimeoutError(self.render_template(self.config.timeout_template, action=action, output=""))
+            raise ExecutionTimeoutError(
+                self.render_template(
+                    self.config.timeout_template, action=action, output=""
+                )
+            )
         self.has_finished(output)
         return output
 
     def has_finished(self, output: dict[str, str]):
         """Raises Submitted exception with final output if the agent has finished its task."""
         lines = output.get("output", "").lstrip().splitlines()
-        if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+        if lines and lines[0].strip() in [
+            "MINI_SWE_AGENT_FINAL_OUTPUT",
+            "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT",
+        ]:
             raise Submitted("\n".join(lines[1:]))
